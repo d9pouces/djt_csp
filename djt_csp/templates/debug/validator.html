@@ -1,0 +1,12 @@
+<ul>
+  {% for message in nu_messages.messages %}
+    <li class="debug-nu-{{ message.type }}{% if message.subtype %} debug-nu-{{ message.subtype }}{% endif %}">
+      <h4>{% if message.firstLine %}{{ message.firstLine }}:{{ message.firstColumn }}{% endif %}
+        {% if message.firstLine and message.lastLine %} - {% endif %}
+        {% if message.lastLine %}{{ message.lastLine }}:{{ message.lastColumn }}{% endif %}</h4>
+      <p>{{ message.message }}</p>
+      {% if message.extract %}
+        <pre>{{ message.extract }}</pre>{% endif %}
+    </li>
+  {% endfor %}
+</ul>
