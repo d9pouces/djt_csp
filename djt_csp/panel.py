@@ -13,20 +13,22 @@
 #  or https://cecill.info/licences/Licence_CeCILL-B_V1-fr.txt (French)         #
 #                                                                              #
 # ##############################################################################
-import json
-from functools import lru_cache
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from functools import lru_cache, cached_property
+from html.parser import HTMLParser
+from logging import INFO, WARNING, CRITICAL, ERROR
+from typing import Dict, List
 
 import pkg_resources
-import requests
 from debug_toolbar.panels import Panel
-from django.conf import settings
 from django.http import HttpResponse, HttpRequest
+
 # noinspection PyProtectedMember
 from django.template import engines, TemplateSyntaxError
 from django.templatetags.static import static
-from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
+
+from djt_csp.checkers import CHECKED_RESOURCES, CHECKED_HTTP_HEADERS, Component, ContentTypeSniff, RefererComponent, \
+    XSSProtection, FrameOptions
 
 
 def template_from_string(template_string):
@@ -44,61 +46,124 @@ def template_from_string(template_string):
     raise TemplateSyntaxError(template_string)
 
 
-class CSPPanel(Panel):
-    """based on https://github.com/peterbe/django-html-validator
+class HeaderHTMLParser(HTMLParser):
+    def __init__(self, *, convert_charrefs=True):
+        super().__init__(convert_charrefs=convert_charrefs)
+        self.headers = {}  # type: Dict[str, str]
+        self.scripts_attributes = []  # type: List[Dict[str, str]]
+        self.http_ws_resources = {
+            x: [] for x in CHECKED_RESOURCES
+        }  # type: Dict[str, List[str]]
 
-and https://github.com/validator/validator/wiki/Output-»-JSON
+    def reset(self):
+        super().reset()
+        self.headers = {}
+        self.scripts_attributes = []
+        self.http_ws_resources = {x: [] for x in CHECKED_RESOURCES}
 
-     """
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        attrs = {x.lower(): y for (x, y) in attrs}
+        http_equiv = attrs.get("http-equiv", "").lower()
+        content = attrs.get("content")
+        if tag == "meta" and http_equiv in CHECKED_HTTP_HEADERS and content:
+            self.headers[http_equiv] = content
+        elif tag == "script":
+            self.scripts_attributes.append(attrs)
+        attr = CHECKED_RESOURCES.get(tag)
+        origin = attrs.get(tag, "")
+        if attr and (origin.startswith("http://") or origin.startswith("ws://")):
+            self.http_ws_resources[tag].append(origin)
 
-    name = "Security Headers"
-    title = "Security headers"
-    template = "templates/debug/validator.html"
+    def error(self, message):
+        pass
+
+
+class SecurityPanel(Panel):
+    """
+    """
+
+    name = "Security score"
+    title = "Security score"
+    template = "templates/debug/security_panel.html"
     has_content = True
-
-    @cached_property
-    def base_url(self):
-        if hasattr(settings, "DJT_NVU_URL"):
-            return settings.DJT_NVU_URL
-        return "https://html5.validator.nu/"
 
     def generate_stats(self, request: HttpRequest, response: HttpResponse):
         content_type = response["Content-Type"]
         if not content_type.startswith("text/html"):
             return
-        if response.status_code < 200 or (300 <= response.status_code < 400):
+        elif response.status_code < 200 or (300 <= response.status_code < 400):
             return
-        content_text = response.content
-        nu_messages = self.validate(content_text, content_type=content_type)
-        for m in nu_messages["messages"]:
-            if "extract" in m:
-                m["extract"] = m["extract"].strip()
+        response_headers = {}
+        for header in CHECKED_HTTP_HEADERS:
+            if header in response:
+                response_headers[header] = response[header]
+        parser = HeaderHTMLParser()
+        try:
+            parser.feed(response.content.decode())
+            scripts_attributes = parser.scripts_attributes
+            html_headers = parser.headers
+            http_ws_resources = parser.http_ws_resources
+        except AssertionError:
+            scripts_attributes = None
+            html_headers = None
+            http_ws_resources = None
         values = {
-            "content_text": content_text,
+            "html_headers": html_headers,
+            "response_headers": response_headers,
             "content_type": content_type,
-            "nu_messages": nu_messages,
+            "scripts_attributes": scripts_attributes,
+            "http_ws_resources": http_ws_resources,
         }
         self.record_stats(values)
 
-    def nav_subtitle(self):
+    @cached_property
+    def components(self) -> List[Component]:
         stats = self.get_stats()
-        nu_messages = stats.get("nu_messages", {})
-        messages = nu_messages.get("messages", [])
+        components = []  # type: List[Component]
+        if stats["html_headers"]:
+            components = [ContentTypeSniff(stats),
+                          RefererComponent(stats),
+                          XSSProtection(stats),
+                          FrameOptions(stats)]
+        for comp in components:
+            comp.load()
+        return components
 
-        if any(x["type"] == "unable" for x in messages):
-            return mark_safe(
-                "<img src='%s' alt='error'> Unable to validate HTML"
-                % (static("admin/img/icon-no.svg"))
-            )
-        elif any(x["type"] == "error" for x in messages):
-            return mark_safe(
-                "<img src='%s' alt='error'> Invalid HTML (%d messages)"
-                % (static("admin/img/icon-no.svg"), len(messages))
-            )
-        return mark_safe(
-            "<img src='%s' alt='error'> Valid HTML! (%d messages)"
-            % (static("admin/img/icon-yes.svg"), len(messages))
-        )
+    def nav_subtitle(self):
+        score = 100
+        level = INFO
+        for comp in self.components:
+            level = max(comp.level, level)
+            score += comp.score
+        scores = [
+            (100, "A+"),
+            (90, "A"),
+            (85, "A-"),
+            (80, "B+"),
+            (70, "B"),
+            (65, "B-"),
+            (60, "C+"),
+            (50, "C"),
+            (45, "C-"),
+            (40, "D+"),
+            (30, "D"),
+            (25, "D-"),
+        ]
+        letter = "F"
+        for score_, letter_ in scores:
+            if score >= score_:
+                letter = letter_
+                break
+        if level >= CRITICAL or score <= 44:
+            img = static("admin/img/icon-no.svg")
+        elif level >= ERROR or score <= 64:
+            img = static("admin/img/icon-no.svg")
+        elif level >= WARNING or score <= 84:
+            img = static("admin/img/icon-alert.svg")
+        else:
+            img = static("admin/img/icon-yes.svg")
+        return mark_safe("<img src='%s' alt='error'> Grade: %s (%s/100)" % (img, letter, score))
 
     @property
     def content(self):
@@ -110,7 +175,7 @@ and https://github.com/validator/validator/wiki/Output-»-JSON
         template's context.
         """
         template = self.get_template()
-        context = self.get_stats()
+        context = {"components": self.components}
         content = template.render(context)
         return content
 
@@ -121,23 +186,3 @@ and https://github.com/validator/validator/wiki/Output-»-JSON
             template_content = fd.read()
         template = template_from_string(template_content)
         return template
-
-    def validate(self, content, content_type="text/html"):
-        parsed_url = urlparse(self.base_url)
-        query = parse_qs(parsed_url.query)
-        query["out"] = ["json"]
-        url = urlunparse(
-            (*parsed_url[:4], urlencode(query, doseq=True), parsed_url[-1])
-        )
-        try:
-            r = requests.post(
-                url, data=content, headers={"Content-Type": content_type}, timeout=1,
-            )
-            if r.status_code == 200:
-                return json.loads(r.text)
-            message = "Invalid response from %s (%s)" % (self.base_url, r.status_code)
-        except requests.ConnectionError as e:
-            message = "Unable to contact %s (%s)" % (self.base_url, e)
-        except Exception as e:
-            message = "Unknown error when connecting to %s (%s)" % (self.base_url, e)
-        return {"messages": [{"type": "unable", "message": message}]}
