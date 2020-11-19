@@ -13,13 +13,16 @@
 #  or https://cecill.info/licences/Licence_CeCILL-B_V1-fr.txt (French)         #
 #                                                                              #
 # ##############################################################################
+import datetime
 from functools import lru_cache, cached_property
 from html.parser import HTMLParser
+from http.cookies import SimpleCookie
 from logging import INFO, WARNING, CRITICAL, ERROR
 from typing import Dict, List
 
 import pkg_resources
 from debug_toolbar.panels import Panel
+from django.conf import settings
 from django.http import HttpResponse, HttpRequest
 
 # noinspection PyProtectedMember
@@ -27,8 +30,16 @@ from django.template import engines, TemplateSyntaxError
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 
-from djt_csp.checkers import CHECKED_RESOURCES, CHECKED_HTTP_HEADERS, Component, ContentTypeSniff, RefererComponent, \
-    XSSProtection, FrameOptions
+from djt_csp.checkers import (
+    CHECKED_RESOURCES,
+    CHECKED_HTTP_HEADERS,
+    Component,
+    ContentTypeSniff,
+    RefererComponent,
+    XSSProtection,
+    FrameOptions,
+    ScriptIntegrityCheck,
+)
 
 
 def template_from_string(template_string):
@@ -94,6 +105,15 @@ class SecurityPanel(Panel):
             return
         elif response.status_code < 200 or (300 <= response.status_code < 400):
             return
+        max_age = 365 * 24 * 60 * 60  # one year
+        expires = datetime.datetime.strftime(datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
+                                             "%a, %d-%b-%Y %H:%M:%S GMT")
+        response.set_cookie("s_1", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
+                            secure=True, httponly=True,  samesite='Strict')
+        response.set_cookie("s_2", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
+                            secure=True, httponly=False,  samesite='None')
+        response.set_cookie("s_3", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
+                            secure=False, httponly=True,  samesite='Lax')
         response_headers = {}
         for header in CHECKED_HTTP_HEADERS:
             if header in response:
@@ -104,11 +124,30 @@ class SecurityPanel(Panel):
             scripts_attributes = parser.scripts_attributes
             html_headers = parser.headers
             http_ws_resources = parser.http_ws_resources
+            cookies_l = []
+            cookies = response.cookies  # type: SimpleCookie
+            for name, values in cookies.items():
+                cookies_l.append(
+                    {
+                        "name": name,
+                        "expires": values["expires"],
+                        "path": values["path"],
+                        "comment": values["comment"],
+                        "domain": values["domain"],
+                        "max-age": values["max-age"],
+                        "secure": values["secure"],
+                        "version": values["version"],
+                        "httponly": values["httponly"],
+                        "samesite": values["samesite"],
+                    }
+                )
         except AssertionError:
             scripts_attributes = None
             html_headers = None
             http_ws_resources = None
+            cookies_l = None
         values = {
+            "cookies": cookies_l,
             "html_headers": html_headers,
             "response_headers": response_headers,
             "content_type": content_type,
@@ -122,10 +161,13 @@ class SecurityPanel(Panel):
         stats = self.get_stats()
         components = []  # type: List[Component]
         if stats["html_headers"]:
-            components = [ContentTypeSniff(stats),
-                          RefererComponent(stats),
-                          XSSProtection(stats),
-                          FrameOptions(stats)]
+            components = [
+                ContentTypeSniff(stats),
+                RefererComponent(stats),
+                XSSProtection(stats),
+                FrameOptions(stats),
+                ScriptIntegrityCheck(stats),
+            ]
         for comp in components:
             comp.load()
         return components
@@ -163,7 +205,9 @@ class SecurityPanel(Panel):
             img = static("admin/img/icon-alert.svg")
         else:
             img = static("admin/img/icon-yes.svg")
-        return mark_safe("<img src='%s' alt='error'> Grade: %s (%s/100)" % (img, letter, score))
+        return mark_safe(
+            "<img src='%s' alt='error'> Grade: %s (%s/100)" % (img, letter, score)
+        )
 
     @property
     def content(self):

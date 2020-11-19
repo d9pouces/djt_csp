@@ -1,10 +1,11 @@
 {% load static i18n %}<ul>
   {% for component in components %}
     <li class="">
-      <h4><img class="djt-csp" src="{% static component.icon %}" alt="{{ component.level }}"> {{ component.title }}: {{ component.score }}</h4>
+      <h4><img class="djt-csp" src="{% static component.icon %}" alt="{{ component.level }}"> {{ component.title }}: {{ component.score }}
+      {% if component.reference_link %}<a href="{{ component.reference_link }}"><img src="{% static "admin/img/icon-unknown.svg" %}"></a>{% endif %}
+      </h4>
       {% if component.description %}<p>{{ component.description }}</p>{% endif %}
     {{ component.content }}
-    {% if component.reference_link %}<a href="{{ component.reference_link }}">{% trans "Check this link to see the documentation." %}</a>{% endif %}
     </li>
   {% endfor %}
 </ul>
