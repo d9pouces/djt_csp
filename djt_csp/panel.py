@@ -33,12 +33,12 @@ from django.utils.safestring import mark_safe
 from djt_csp.checkers import (
     CHECKED_RESOURCES,
     CHECKED_HTTP_HEADERS,
-    Component,
+    Checker,
     ContentTypeSniff,
     RefererComponent,
     XSSProtection,
     FrameOptions,
-    ScriptIntegrityCheck,
+    ScriptIntegrityChecker, CookieAnalyzer,
 )
 
 
@@ -157,16 +157,17 @@ class SecurityPanel(Panel):
         self.record_stats(values)
 
     @cached_property
-    def components(self) -> List[Component]:
+    def components(self) -> List[Checker]:
         stats = self.get_stats()
-        components = []  # type: List[Component]
+        components = []  # type: List[Checker]
         if stats["html_headers"]:
             components = [
                 ContentTypeSniff(stats),
                 RefererComponent(stats),
                 XSSProtection(stats),
                 FrameOptions(stats),
-                ScriptIntegrityCheck(stats),
+                ScriptIntegrityChecker(stats),
+                CookieAnalyzer(stats),
             ]
         for comp in components:
             comp.load()

@@ -20,8 +20,10 @@ https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/scoring.md
 import html
 from html import escape
 from logging import INFO, ERROR, WARNING
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict, List, Union
 
+from django.conf import settings
+from django.templatetags.static import static
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -46,7 +48,14 @@ CHECKED_RESOURCES = {
 }
 
 
-class Component:
+def bool_icon(b: bool) -> str:
+    icon = "admin/img/icon-no.svg"
+    if b:
+        icon = "admin/img/icon-yes.svg"
+    return '<img src="%s" alt="%s">' % (static(icon), b)
+
+
+class Checker:
     title = None
     description = None
     reference_link = None
@@ -61,7 +70,7 @@ class Component:
         self.http_ws_resources = stats[
             "http_ws_resources"
         ]  # type: Dict[str, List[str]]
-        self.cookies = stats["cookies"]  # type: List[Dict[str, str]]
+        self.cookies = stats["cookies"]  # type: List[Dict[str, Union[str, bool]]]
 
     def load(self):
         pass
@@ -96,7 +105,7 @@ class Component:
         return None, False
 
 
-class HeaderComponent(Component):
+class HeaderChecker(Checker):
 
     header_name = None  # type: str
     header_values = {
@@ -150,7 +159,7 @@ class HeaderComponent(Component):
         return max(self.header_values.values())
 
 
-class ContentTypeSniff(HeaderComponent):
+class ContentTypeSniff(HeaderChecker):
     """x-content-type-options-nosniff	X-Content-Type-Options header set to nosniff	0
 x-content-type-options-not-implemented	X-Content-Type-Options header not implemented	-5
 x-content-type-options-header-invalid	X-Content-Type-Options header cannot be recognized	-5
@@ -164,7 +173,7 @@ x-content-type-options-header-invalid	X-Content-Type-Options header cannot be re
     invalid_valid_score = -5
 
 
-class RefererComponent(HeaderComponent):
+class RefererComponent(HeaderChecker):
     """referrer-policy-private	Referrer-Policy header set to no-referrer or same-origin, strict-origin or strict-origin-when-cross-origin	5
 referrer-policy-no-referrer-when-downgrade	Referrer-Policy header set to no-referrer-when-downgrade	0
 referrer-policy-not-implemented	Referrer-Policy header not implemented	0
@@ -191,7 +200,7 @@ referrer-policy-header-invalid	Referrer-Policy header cannot be recognized	-5
     }
 
 
-class XSSProtection(HeaderComponent):
+class XSSProtection(HeaderChecker):
     """x-xss-protection-not-needed-due-to-csp	X-XSS-Protection header not needed due to strong Content Security Policy (CSP) header	0
 x-xss-protection-enabled-mode-block	X-XSS-Protection header set to 1; mode=block	0
 x-xss-protection-enabled	X-XSS-Protection header set to 1	0
@@ -214,7 +223,7 @@ x-xss-protection-header-invalid	X-XSS-Protection header cannot be recognized	-10
     }
 
 
-class FrameOptions(HeaderComponent):
+class FrameOptions(HeaderChecker):
     """x-frame-options-implemented-via-csp	X-Frame-Options (XFO) implemented via the CSP frame-ancestors directive	5
 x-frame-options-allow-from-origin	X-Frame-Options (XFO) header uses ALLOW-FROM uri directive	0
 x-frame-options-sameorigin-or-deny	X-Frame-Options (XFO) header set to SAMEORIGIN or DENY	0
@@ -236,7 +245,7 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
     }
 
 
-class ScriptIntegrityCheck(Component):
+class ScriptIntegrityChecker(Checker):
     """
 sri-implemented-and-all-scripts-loaded-securely	                Subresource Integrity (SRI) is implemented and all scripts are loaded from a similar origin	5
 sri-implemented-and-external-scripts-loaded-securely	        Subresource Integrity (SRI) is implemented and all scripts are loaded securely	5
@@ -298,7 +307,7 @@ sri-not-implemented-response-not-html	                        Subresource Integr
             note = 0
             notes.append(
                 _(
-                    "Subresource Integrity (SRI) not implemented as all scripts are loaded from a similar origin"
+                    "Subresource Integrity (SRI) not implemented but all scripts are loaded from a similar origin"
                 )
             )
         elif sri_counts["similar"] + sri_counts["https"] > 0:
@@ -318,7 +327,7 @@ sri-not-implemented-response-not-html	                        Subresource Integr
         return note
 
 
-class CORSComponent(HeaderComponent):
+class CORSChecker(HeaderChecker):
     """cross-origin-resource-sharing-
 implemented-with-public-access	Public content is visible via cross-origin resource sharing (CORS) Access-Control-Allow-Origin header	0
 cross-origin-resource-sharing-implemented-with-restricted-access	Content is visible via cross-origin resource sharing (CORS) files or headers, but is restricted to specific domains	0
@@ -343,7 +352,7 @@ cross-origin-resource-sharing-implemented-with-universal-access"""
     }
 
 
-class CookieAnalyzer(Component):
+class CookieAnalyzer(Checker):
     """
 cookies-secure-with-httponly-sessions-and-samesite	All cookies use the Secure flag, session cookies use the HttpOnly flag, and cross-origin restrictions are in place via the SameSite flag	5
 cookies-not-found	No cookies detected	0
@@ -356,74 +365,112 @@ cookies-anticsrf-without-samesite-flag	Anti-CSRF tokens set without using the Sa
 cookies-session-without-httponly-flag	Session cookie set without using the HttpOnly flag	-30
 cookies-session-without-secure-flag	Session cookie set without using the Secure flag or set over http	-40
     """
-
+    title = _("Cookies analyzis")
     reference_link = "https://infosec.mozilla.org/guidelines/web_security#cookies"
 
+    @property
     def content(self) -> str:
+        content, __ = self.analyzis
+        return mark_safe(content)
+
+    @property
+    def score(self) -> int:
+        __, score = self.analyzis
+        return score
+
+    @cached_property
+    def analyzis(self) -> Tuple[str, int]:
         content = (
-            "<table><thead><tr>"
-            "<th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th>"
-            "</tr></thead><tbody>\n"
-            % (
-                _("name"),
-                _("path"),
-                _("domain"),
-                _("secure"),
-                _("samesite"),
-                _("HTTP only"),
-                _("max age"),
-            )
+                "<table><thead><tr>"
+                "<th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th>"
+                "</tr></thead><tbody>\n"
+                % (
+                    _("name"),
+                    _("path"),
+                    _("domain"),
+                    _("secure"),
+                    _("samesite"),
+                    _("HTTP only"),
+                    _("prefixed"),
+                )
         )
-
+        non_secure_count = 0
+        no_cross_origin_count = 0
+        non_prefixed_count = 0
+        session_is_httponly = True
+        csrf_is_samesite = True
+        session_is_secure = True
         for cookie in self.cookies:
-            content += "<tr><td>%s</td>" \
-                       "<td>%s</td>" \
-                       "</tr>" % (escape(cookie["name"]), escape(cookie["path"]))
+            name = cookie["name"]
+            samesite_value = (cookie["samesite"] or "").lower()
+            if name == settings.SESSION_COOKIE_NAME:
+                session_is_httponly = session_is_httponly and cookie["httponly"]
+                session_is_secure = session_is_secure and cookie["secure"]
+            if name == settings.CSRF_COOKIE_NAME:
+                csrf_is_samesite = csrf_is_samesite and (samesite_value in {"strict", "lax"})
+            prefixed = name.startswith("__Secure-") or name.startswith("__Secure-")
+            if not prefixed:
+                non_prefixed_count += 1
+            if not cookie["secure"]:
+                non_secure_count += 1
+            if samesite_value not in {"strict", "lax"}:
+                no_cross_origin_count += 1
+            content += (
+                    "<tr>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "<td>%s</td>"
+                    "</tr>"
+                    % (
+                        escape(name),
+                        escape(cookie["path"]),
+                        escape(cookie["domain"]),
+                        bool_icon(cookie["secure"]),
+                        escape(cookie["samesite"]),
+                        bool_icon(cookie["httponly"]),
+                        bool_icon(prefixed),
+                    )
+            )
+        content += "</tbody></table>\n"
+        hsts, __ = self.get_header("Strict-Transport-Security")
+        score = 0
+        comment = ""
+        if non_secure_count == 0 and session_is_httponly and no_cross_origin_count == 0:
+            score = 5
+        elif len(self.cookies) == 0:
+            content = _("No cookies detected")
+            score = 0
+        elif non_secure_count == 0 and session_is_httponly:
+            score = 0
+            comment = _("All cookies use the Secure flag and all session cookies use the HttpOnly flag")
+        elif hsts and non_secure_count > 0 and session_is_secure:
+            comment = _("Cookies set without using the Secure flag, but transmission over HTTP prevented by HSTS")
+            score = -5
+        elif hsts and not session_is_secure:
+            comment= _("Session cookie set without the Secure flag, but transmission over HTTP prevented by HSTS")
+            score = -10
+        if not csrf_is_samesite:
+            comment = _("Anti-CSRF tokens set without using the SameSite flag")
+            score = -20
+        elif no_cross_origin_count > 0:
+            comment = _("Cookies use SameSite flag, but set to something other than Strict or Lax")
+            score = -20
+        if not session_is_httponly:
+            comment = _("Session cookie set without using the HttpOnly flag")
+            score = -30
+        if not session_is_secure:
+            comment = _("Session cookie set without using the Secure flag or set over http")
+            score = -40
+        if comment:
+            content = "<p>%s.</p>%s" % (comment, content)
+        return content, score
 
 
-        content += "</tbody></table>"
-        pass
-        [
-            {
-                "name": "s_1",
-                "expires": "Fri, 19-Nov-2021 07:09:37 GMT",
-                "path": "/",
-                "comment": "",
-                "domain": "",
-                "max-age": 31536000,
-                "secure": True,
-                "version": "",
-                "httponly": True,
-                "samesite": "Strict",
-            },
-            {
-                "name": "s_2",
-                "expires": "Fri, 19-Nov-2021 07:09:37 GMT",
-                "path": "/",
-                "comment": "",
-                "domain": "",
-                "max-age": 31536000,
-                "secure": True,
-                "version": "",
-                "httponly": "",
-                "samesite": "None",
-            },
-            {
-                "name": "s_3",
-                "expires": "Fri, 19-Nov-2021 07:09:37 GMT",
-                "path": "/",
-                "comment": "",
-                "domain": "",
-                "max-age": 31536000,
-                "secure": "",
-                "version": "",
-                "httponly": True,
-                "samesite": "Lax",
-            },
-        ]
-
-
-class CSPComponent(Component):
+class CSPChecker(Checker):
     """csp-implemented-with-no-unsafe-default-src-none	Content Security Policy (CSP) implemented with default-src 'none' and without 'unsafe-inline' or 'unsafe-eval'	10
 csp-implemented-with-no-unsafe	Content Security Policy (CSP) implemented without 'unsafe-inline' or 'unsafe-eval'	5
 csp-implemented-with-unsafe-inline-in-style-src-only	Content Security Policy (CSP) implemented with unsafe directives inside style-src. This includes 'unsafe-inline', data:, or overly broad sources such as https:.	0
