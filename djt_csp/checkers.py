@@ -18,9 +18,11 @@ https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/scoring.md
 
 """
 import html
+import re
+from functools import lru_cache
 from html import escape
 from logging import INFO, ERROR, WARNING
-from typing import Optional, Tuple, Dict, List, Union
+from typing import Optional, Tuple, Dict, List, Union, Set
 
 from django.conf import settings
 from django.templatetags.static import static
@@ -30,7 +32,6 @@ from django.utils.translation import gettext_lazy as _
 
 CHECKED_HTTP_HEADERS = {
     "content-security-policy",
-    "content-security-policy-report-only",
     "access-control-allow-origin",
     "strict-transport-security",
     "referrer-policy",
@@ -71,6 +72,7 @@ class Checker:
             "http_ws_resources"
         ]  # type: Dict[str, List[str]]
         self.cookies = stats["cookies"]  # type: List[Dict[str, Union[str, bool]]]
+        self.is_secure = stats["is_secure"]  # type: bool
 
     def load(self):
         pass
@@ -106,7 +108,6 @@ class Checker:
 
 
 class HeaderChecker(Checker):
-
     header_name = None  # type: str
     header_values = {
         None: 0,
@@ -174,7 +175,9 @@ x-content-type-options-header-invalid	X-Content-Type-Options header cannot be re
 
 
 class RefererComponent(HeaderChecker):
-    """referrer-policy-private	Referrer-Policy header set to no-referrer or same-origin, strict-origin or strict-origin-when-cross-origin	5
+    """
+    referrer-policy-private	Referrer-Policy header set to no-referrer or same-origin, strict-origin or
+        strict-origin-when-cross-origin	5
 referrer-policy-no-referrer-when-downgrade	Referrer-Policy header set to no-referrer-when-downgrade	0
 referrer-policy-not-implemented	Referrer-Policy header not implemented	0
 referrer-policy-unsafe	Referrer-Policy header unsafely set to origin, origin-when-cross-origin, or unsafe-url	-5
@@ -201,7 +204,9 @@ referrer-policy-header-invalid	Referrer-Policy header cannot be recognized	-5
 
 
 class XSSProtection(HeaderChecker):
-    """x-xss-protection-not-needed-due-to-csp	X-XSS-Protection header not needed due to strong Content Security Policy (CSP) header	0
+    """
+x-xss-protection-not-needed-due-to-csp	X-XSS-Protection header not needed due to strong
+        Content Security Policy (CSP) header	0
 x-xss-protection-enabled-mode-block	X-XSS-Protection header set to 1; mode=block	0
 x-xss-protection-enabled	X-XSS-Protection header set to 1	0
 x-xss-protection-disabled	X-XSS-Protection header set to 0 (disabled)	-10
@@ -247,15 +252,23 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
 
 class ScriptIntegrityChecker(Checker):
     """
-sri-implemented-and-all-scripts-loaded-securely	                Subresource Integrity (SRI) is implemented and all scripts are loaded from a similar origin	5
-sri-implemented-and-external-scripts-loaded-securely	        Subresource Integrity (SRI) is implemented and all scripts are loaded securely	5
-sri-not-implemented-but-all-scripts-loaded-from-secure-origin	Subresource Integrity (SRI) not implemented as all scripts are loaded from a similar origin	0
+sri-implemented-and-all-scripts-loaded-securely	                Subresource Integrity (SRI) is implemented 
+        and all scripts are loaded from a similar origin	5
+sri-implemented-and-external-scripts-loaded-securely	        Subresource Integrity (SRI) is implemented
+        and all scripts are loaded securely	5
+sri-not-implemented-but-all-scripts-loaded-from-secure-origin	Subresource Integrity (SRI) not implemented 
+        as all scripts are loaded from a similar origin	0
 
-sri-not-implemented-but-external-scripts-loaded-securely	    Subresource Integrity (SRI) not implemented, but all external scripts are loaded over https	-5
-sri-implemented-but-external-scripts-not-loaded-securely	    Subresource Integrity (SRI) implemented, but external scripts are loaded over http	-20
-sri-not-implemented-and-external-scripts-not-loaded-securely	Subresource Integrity (SRI) is not implemented, and external scripts are not loaded over https	-50
-sri-not-implemented-but-no-scripts-loaded	                    Subresource Integrity (SRI) is not needed since site contains no script tags	0
-sri-not-implemented-response-not-html	                        Subresource Integrity (SRI) is only needed for html resources	0
+sri-not-implemented-but-external-scripts-loaded-securely	    Subresource Integrity (SRI) not implemented, 
+        but all external scripts are loaded over https	-5
+sri-implemented-but-external-scripts-not-loaded-securely	    Subresource Integrity (SRI) implemented, but 
+        external scripts are loaded over http	-20
+sri-not-implemented-and-external-scripts-not-loaded-securely	Subresource Integrity (SRI) is not implemented,
+        and external scripts are not loaded over https	-50
+sri-not-implemented-but-no-scripts-loaded	                    Subresource Integrity (SRI) is not needed since
+        site contains no script tags	0
+sri-not-implemented-response-not-html	                        Subresource Integrity (SRI) is only needed
+        for html resources	0
 """
 
     title = _("Subresource Integrity")
@@ -329,9 +342,12 @@ sri-not-implemented-response-not-html	                        Subresource Integr
 
 class CORSChecker(HeaderChecker):
     """cross-origin-resource-sharing-
-implemented-with-public-access	Public content is visible via cross-origin resource sharing (CORS) Access-Control-Allow-Origin header	0
-cross-origin-resource-sharing-implemented-with-restricted-access	Content is visible via cross-origin resource sharing (CORS) files or headers, but is restricted to specific domains	0
-cross-origin-resource-sharing-not-implemented	Content is not visible via cross-origin resource sharing (CORS) files or headers	0
+implemented-with-public-access	Public content is visible via cross-origin resource sharing (CORS)
+        Access-Control-Allow-Origin header	0
+cross-origin-resource-sharing-implemented-with-restricted-access	Content is visible via cross-origin 
+        resource sharing (CORS) files or headers, but is restricted to specific domains	0
+cross-origin-resource-sharing-not-implemented	Content is not visible via cross-origin resource sharing
+        (CORS) files or headers	0
 xml-not-parsable	crossdomain.xml or clientaccesspolicy.xml claims to be xml, but cannot be parsed	-20
 cross-origin-resource-sharing-implemented-with-universal-access"""
 
@@ -354,17 +370,22 @@ cross-origin-resource-sharing-implemented-with-universal-access"""
 
 class CookieAnalyzer(Checker):
     """
-cookies-secure-with-httponly-sessions-and-samesite	All cookies use the Secure flag, session cookies use the HttpOnly flag, and cross-origin restrictions are in place via the SameSite flag	5
+cookies-secure-with-httponly-sessions-and-samesite	All cookies use the Secure flag, session cookies use the 
+        HttpOnly flag, and cross-origin restrictions are in place via the SameSite flag	5
 cookies-not-found	No cookies detected	0
-cookies-secure-with-httponly-sessions	All cookies use the Secure flag and all session cookies use the HttpOnly flag	0
-cookies-without-secure-flag-but-protected-by-hsts	Cookies set without using the Secure flag, but transmission over HTTP prevented by HSTS	-5
-cookies-session-without-secure-flag-but-protected-by-hsts	Session cookie set without the Secure flag, but transmission over HTTP prevented by HSTS	-10
+cookies-secure-with-httponly-sessions	All cookies use the Secure flag and all session cookies use the HttpOnly 
+        flag	0
+cookies-without-secure-flag-but-protected-by-hsts	Cookies set without using the Secure flag, but transmission 
+        over HTTP prevented by HSTS	-5
+cookies-session-without-secure-flag-but-protected-by-hsts	Session cookie set without the Secure flag, but 
+        transmission over HTTP prevented by HSTS	-10
 cookies-without-secure-flag	Cookies set without using the Secure flag or set over http	-20
 cookies-samesite-flag-invalid	Cookies use SameSite flag, but set to something other than Strict or Lax	-20
 cookies-anticsrf-without-samesite-flag	Anti-CSRF tokens set without using the SameSite flag	-20
 cookies-session-without-httponly-flag	Session cookie set without using the HttpOnly flag	-30
 cookies-session-without-secure-flag	Session cookie set without using the Secure flag or set over http	-40
     """
+
     title = _("Cookies analyzis")
     reference_link = "https://infosec.mozilla.org/guidelines/web_security#cookies"
 
@@ -381,18 +402,18 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
     @cached_property
     def analyzis(self) -> Tuple[str, int]:
         content = (
-                "<table><thead><tr>"
-                "<th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th>"
-                "</tr></thead><tbody>\n"
-                % (
-                    _("name"),
-                    _("path"),
-                    _("domain"),
-                    _("secure"),
-                    _("samesite"),
-                    _("HTTP only"),
-                    _("prefixed"),
-                )
+            "<table><thead><tr>"
+            "<th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th>"
+            "</tr></thead><tbody>\n"
+            % (
+                _("name"),
+                _("path"),
+                _("domain"),
+                _("secure"),
+                _("samesite"),
+                _("HTTP only"),
+                _("prefixed"),
+            )
         )
         non_secure_count = 0
         no_cross_origin_count = 0
@@ -407,7 +428,9 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
                 session_is_httponly = session_is_httponly and cookie["httponly"]
                 session_is_secure = session_is_secure and cookie["secure"]
             if name == settings.CSRF_COOKIE_NAME:
-                csrf_is_samesite = csrf_is_samesite and (samesite_value in {"strict", "lax"})
+                csrf_is_samesite = csrf_is_samesite and (
+                    samesite_value in {"strict", "lax"}
+                )
             prefixed = name.startswith("__Secure-") or name.startswith("__Secure-")
             if not prefixed:
                 non_prefixed_count += 1
@@ -416,24 +439,24 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
             if samesite_value not in {"strict", "lax"}:
                 no_cross_origin_count += 1
             content += (
-                    "<tr>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "<td>%s</td>"
-                    "</tr>"
-                    % (
-                        escape(name),
-                        escape(cookie["path"]),
-                        escape(cookie["domain"]),
-                        bool_icon(cookie["secure"]),
-                        escape(cookie["samesite"]),
-                        bool_icon(cookie["httponly"]),
-                        bool_icon(prefixed),
-                    )
+                "<tr>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "<td>%s</td>"
+                "</tr>"
+                % (
+                    escape(name),
+                    escape(cookie["path"]),
+                    escape(cookie["domain"]),
+                    bool_icon(cookie["secure"]),
+                    escape(cookie["samesite"]),
+                    bool_icon(cookie["httponly"]),
+                    bool_icon(prefixed),
+                )
             )
         content += "</tbody></table>\n"
         hsts, __ = self.get_header("Strict-Transport-Security")
@@ -446,24 +469,34 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
             score = 0
         elif non_secure_count == 0 and session_is_httponly:
             score = 0
-            comment = _("All cookies use the Secure flag and all session cookies use the HttpOnly flag")
+            comment = _(
+                "All cookies use the Secure flag and all session cookies use the HttpOnly flag"
+            )
         elif hsts and non_secure_count > 0 and session_is_secure:
-            comment = _("Cookies set without using the Secure flag, but transmission over HTTP prevented by HSTS")
+            comment = _(
+                "Cookies set without using the Secure flag, but transmission over HTTP prevented by HSTS"
+            )
             score = -5
         elif hsts and not session_is_secure:
-            comment= _("Session cookie set without the Secure flag, but transmission over HTTP prevented by HSTS")
+            comment = _(
+                "Session cookie set without the Secure flag, but transmission over HTTP prevented by HSTS"
+            )
             score = -10
         if not csrf_is_samesite:
             comment = _("Anti-CSRF tokens set without using the SameSite flag")
             score = -20
         elif no_cross_origin_count > 0:
-            comment = _("Cookies use SameSite flag, but set to something other than Strict or Lax")
+            comment = _(
+                "Cookies use SameSite flag, but set to something other than Strict or Lax"
+            )
             score = -20
         if not session_is_httponly:
             comment = _("Session cookie set without using the HttpOnly flag")
             score = -30
         if not session_is_secure:
-            comment = _("Session cookie set without using the Secure flag or set over http")
+            comment = _(
+                "Session cookie set without using the Secure flag or set over http"
+            )
             score = -40
         if comment:
             content = "<p>%s.</p>%s" % (comment, content)
@@ -471,13 +504,235 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
 
 
 class CSPChecker(Checker):
-    """csp-implemented-with-no-unsafe-default-src-none	Content Security Policy (CSP) implemented with default-src 'none' and without 'unsafe-inline' or 'unsafe-eval'	10
+    """
+
+csp-implemented-with-no-unsafe-default-src-none	Content Security Policy (CSP) implemented with
+    default-src 'none' and without 'unsafe-inline' or 'unsafe-eval'	10
 csp-implemented-with-no-unsafe	Content Security Policy (CSP) implemented without 'unsafe-inline' or 'unsafe-eval'	5
-csp-implemented-with-unsafe-inline-in-style-src-only	Content Security Policy (CSP) implemented with unsafe directives inside style-src. This includes 'unsafe-inline', data:, or overly broad sources such as https:.	0
-csp-implemented-with-insecure-scheme-in-passive-content-only	Content Security Policy (CSP) implemented, but secure site allows images or media to be loaded over http	-10
+csp-implemented-with-unsafe-inline-in-style-src-only	Content Security Policy (CSP) implemented with unsafe
+    directives inside style-src. This includes 'unsafe-inline', data:, or overly broad sources such as https:.	0
+csp-implemented-with-insecure-scheme-in-passive-content-only	Content Security Policy (CSP) implemented, but
+    secure site allows images or media to be loaded over http	-10
 csp-implemented-with-unsafe-eval	Content Security Policy (CSP) implemented, but allows 'unsafe-eval'	-10
-csp-implemented-with-insecure-scheme	Content Security Policy (CSP) implemented, but secure site allows resources to be loaded from http	-20
-csp-implemented-with-unsafe-inline	Content Security Policy (CSP) implemented unsafely. This includes \'unsafe-inline\' or data: inside script-src, overly broad sources such as https: inside object-src or script-src, or not restricting the sources for object-src or script-src.	-20
-csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
+csp-implemented-with-insecure-scheme	Content Security Policy (CSP) implemented, but secure site allows resources
+    to be loaded from http	-20
+csp-implemented-with-unsafe-inline	Content Security Policy (CSP) implemented unsafely. This includes
+    \'unsafe-inline\' or data: inside script-src, overly broad sources such as https: inside object-src or script-src,
+    or not restricting the sources for object-src or script-src.	-20
 csp-header-invalid	Content Security Policy (CSP) header cannot be parsed successfully	-25
+csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
 """
+
+    title = _("Content security policy")
+    reference_link = (
+        "https://infosec.mozilla.org/guidelines/web_security#content-security-policy"
+    )
+
+    def __init__(self, stats):
+        super().__init__(stats=stats)
+        self.by_directive = None
+
+    @property
+    def content(self) -> str:
+        content, __ = self.analyzis
+        return mark_safe(content)
+
+    @property
+    def score(self) -> int:
+        __, score = self.analyzis
+        return score
+
+    @cached_property
+    def analyzis(self) -> Tuple[str, int]:
+        value, src = self.get_header("Content-Security-Policy")
+        if value is None:
+            return (
+                "<p>%s</p>"
+                % _("Content Security Policy (CSP) header not implemented."),
+                -25,
+            )
+        self.by_directive = parse_csp(value)
+        directives = CSPParser.fetch_directives
+        if self.by_directive is None:
+            comment = _(
+                "Content Security Policy (CSP) header cannot be parsed successfully."
+            )
+            score = -25
+        elif self.get_sources("default-src") == {"none"} and all(
+            {"unsafe-inline", "unsafe-eval"}.isdisjoint(x)
+            for x in self.by_directive.values()
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented with default-src 'none'"
+                " and without 'unsafe-inline' or 'unsafe-eval'"
+            )
+            score = 10
+        elif all(
+            {"unsafe-inline", "unsafe-eval"}.isdisjoint(self.get_sources(x))
+            for x in directives
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented without 'unsafe-inline' or 'unsafe-eval'"
+            )
+            score = 5
+        elif all(
+            {"unsafe-inline", "data:", "http:", "https:"}.isdisjoint(self.get_sources(x))
+            for x in directives
+            if x != "style-src"
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented with unsafe directives inside style-src. "
+                "This includes 'unsafe-inline', data:, or overly broad sources such as https: "
+            )
+            score = 0
+        elif any(
+            {"http:", "http://"}.intersection(self.get_sources(x))
+            for x in ("frame-src", "object-src", "media-src", "img-src",)
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented, but secure site allows images "
+                "or media to be loaded over http"
+            )
+            score = -10
+        elif any(
+            "unsafe-eval" in self.get_sources(x) for x in directives
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented, but allows 'unsafe-eval'"
+            )
+            score = -10
+        elif self.is_secure and any(
+                {"http://", "http:"} .intersection(self.get_sources(x)) for x in directives
+        ):
+            comment = _(
+                "Content Security Policy (CSP) implemented, but secure site allows resources to be loaded from http"
+            )
+            score = -20
+        elif ({"unsafe-inline", "data:", "https:"} .intersection(self.get_sources("script-src")) or
+            {"https:"} .intersection(self.get_sources("object-src"))):
+            comment = _(
+                "Content Security Policy (CSP) implemented unsafely. This includes 'unsafe-inline\' or data:"
+                " inside script-src, overly broad sources such as https: inside object-src or script-src, or"
+                " not restricting the sources for object-src or script-src."
+            )
+            score = -20
+        elif not self.is_secure:
+            comment = _("Content Security Policy (CSP) implemented, but site is not secure")
+            score = -10
+        else:
+            comment = _("No comment")
+            score = 0
+        return (
+            "<p>%s</p>" % comment,
+            score,
+        )
+
+    def get_sources(self, directive: str):
+        return self.by_directive.get(
+            directive, self.by_directive.get("default-src", CSPParser.any_sources),
+        )
+
+
+class CSPParser:
+    fetch_directives = {
+        "child-src",
+        "connect-src",
+        "default-src",
+        "font-src",
+        "frame-src",
+        "img-src",
+        "manifest-src",
+        "media-src",
+        "object-src",
+        "prefetch-src",
+        "script-src",
+        "script-src-elem",
+        "script-src-attr",
+        "style-src",
+        "style-src-elem",
+        "style-src-attr",
+        "worker-src",
+    }
+    document_directives = {"base-uri", "plugin-types", "sandbox"}
+    navigation_directives = {"form-action", "frame-ancestors", "navigate-to"}
+    report_directives = {"report-uri", "report-to"}
+    other_directives = {
+        "block-all-mixed-content",
+        "referrer",
+        "require-sri-for",
+        "trusted-types",
+        "upgrade-insecure-requests",
+    }
+    all_directives = (
+        fetch_directives
+        | document_directives
+        | navigation_directives
+        | report_directives
+        | other_directives
+    )
+    any_sources = {
+        "http:",
+        "https:",
+        "blob:",
+        "mediastream:",
+        "filesystem:",
+        "data:",
+        "unsafe-eval",
+        "unsafe-hashes",
+        "unsafe-inline",
+    }
+
+    source_re = re.compile(
+        r"^("
+        r"'http:'|'https:'|'blob:'|'mediastream:'|'filesystem:'|'data:'|"
+        r"http:|https:|blob:|mediastream:|filesystem:|data:|"
+        r"'self'|'unsafe-eval'|'unsafe-hashes'|'unsafe-inline'|'none'|'nonce-[A-Za-z\d+/]+'|"
+        r"'sha256-[A-Za-z\d+/]+'|'sha384-[A-Za-z\d+/]+'|'sha512-[A-Za-z\d+/]+'|"
+        r"(http://|https://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?"
+        r")$"
+    )
+    host_re = re.compile(r"^((http://|https://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?)$")
+    data_re = re.compile(r"^(nonce-|sha256-|sha384-|sha512-)")
+
+    def parse_csp(self, policies: str) -> Dict[str, Set[str]]:
+        by_directive = {}
+        for policy in policies.split(";"):
+            parsed_policy = self.parse_policy(policy.strip())
+            if parsed_policy:
+                directive, sources = parsed_policy
+                by_directive[directive] = sources
+        return by_directive
+
+    def parse_policy(self, policy: str) -> Optional[Tuple[str, Set[str]]]:
+        directive, sep, arg = policy.partition(" ")
+        if directive not in self.all_directives:
+            raise ValueError("%s is not recognized" % directive)
+        if directive not in self.fetch_directives:
+            return
+        sources = set()
+        for source in arg.split(" "):
+            if not source or not self.source_re.match(source):
+                continue
+            if self.host_re.match(source):
+                if source.startswith("http://"):
+                    sources.add("http://")
+                elif source.startswith("https://"):
+                    sources.add("http://")
+                else:
+                    sources |= {"http://", "https://"}
+                continue
+            source = source.replace("'", "")
+            if self.data_re.match(source):
+                sources.add(source.split("-")[0])
+                continue
+            sources.add(source)
+        return directive, sources
+
+
+@lru_cache()
+def parse_csp(policies: str) -> Optional[Dict[str, Set[str]]]:
+    parser = CSPParser()
+    try:
+        return parser.parse_csp(policies)
+    except ValueError:
+        return None

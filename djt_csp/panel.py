@@ -38,7 +38,7 @@ from djt_csp.checkers import (
     RefererComponent,
     XSSProtection,
     FrameOptions,
-    ScriptIntegrityChecker, CookieAnalyzer,
+    ScriptIntegrityChecker, CookieAnalyzer, CSPChecker,
 )
 
 
@@ -153,6 +153,7 @@ class SecurityPanel(Panel):
             "content_type": content_type,
             "scripts_attributes": scripts_attributes,
             "http_ws_resources": http_ws_resources,
+            "is_secure": request.is_secure(),
         }
         self.record_stats(values)
 
@@ -166,6 +167,7 @@ class SecurityPanel(Panel):
                 RefererComponent(stats),
                 XSSProtection(stats),
                 FrameOptions(stats),
+                CSPChecker(stats),
                 ScriptIntegrityChecker(stats),
                 CookieAnalyzer(stats),
             ]
