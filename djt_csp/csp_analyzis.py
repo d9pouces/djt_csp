@@ -2,7 +2,15 @@ import re
 from functools import lru_cache
 from typing import Optional, Set, Dict, Tuple
 
+from django.templatetags.static import static
 from django.utils.translation import gettext_lazy as _
+
+
+def bool_icon(b: bool) -> str:
+    icon = "admin/img/icon-no.svg"
+    if b:
+        icon = "admin/img/icon-yes.svg"
+    return '<img src="%s" alt="%s">' % (static(icon), b)
 
 
 class CSPParser:
@@ -184,13 +192,13 @@ class CSPParser:
 
     @property
     def check_base_tag(self):
-        """Restricts use of the <base> tag by using base-uri 'none', base-uri 'self', or specific origins"""
+        """Restricts use of the &lt;base&gt; tag by using base-uri 'none', base-uri 'self', or specific origins"""
         base = self.sources("base-uri")
         return {"none", "self", "http://", "https://"}.issuperset(base)
 
     @property
     def check_form_destinations(self):
-        """Restricts where <form> contents may be submitted by using form-action 'none',
+        """Restricts where &lt;form&gt; contents may be submitted by using form-action 'none',
         form-action 'self', or specific URIs"""
         base = self.sources("form-action")
         return {"none", "self", "http://", "https://"}.issuperset(base)
@@ -215,13 +223,14 @@ def get_csp_parser(policies: str, is_secure: bool = True) -> Optional[CSPParser]
 def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
     if policies is None:
         return (
-            "<p>%s</p>"
-            % _("Content Security Policy (CSP) header not implemented."),
+            "<p>%s</p>" % _("Content Security Policy (CSP) header not implemented."),
             -25,
         )
     parser = get_csp_parser(policies, is_secure=is_secure)
     if parser is None:
-        comment = _("Content Security Policy (CSP) header cannot be parsed successfully.")
+        comment = _(
+            "Content Security Policy (CSP) header cannot be parsed successfully."
+        )
         score = -25
     elif parser.check_default_deny and all(
         {"unsafe-inline", "unsafe-eval"}.isdisjoint(parser.sources(x))
@@ -241,9 +250,7 @@ def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
         )
         score = 5
     elif all(
-        {"unsafe-inline", "data:", "http:", "https:"}.isdisjoint(
-            parser.sources(x)
-        )
+        {"unsafe-inline", "data:", "http:", "https:"}.isdisjoint(parser.sources(x))
         for x in parser.fetch_directives
         if x != "style-src"
     ):
@@ -267,7 +274,8 @@ def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
         )
         score = -10
     elif parser.is_secure and any(
-        {"http://", "http:"}.intersection(parser.sources(x)) for x in parser.fetch_directives
+        {"http://", "http:"}.intersection(parser.sources(x))
+        for x in parser.fetch_directives
     ):
         comment = _(
             "Content Security Policy (CSP) implemented, but secure site allows resources to be loaded from http"
@@ -283,14 +291,33 @@ def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
         )
         score = -20
     elif not parser.is_secure:
-        comment = _(
-            "Content Security Policy (CSP) implemented, but site is not secure"
-        )
+        comment = _("Content Security Policy (CSP) implemented, but site is not secure")
         score = -10
     else:
-        comment = _("No comment")
+        comment = None
         score = 0
-    return (
-        "<p>%s</p>" % comment,
-        score,
-    )
+    desc = "<p>%s</p>" % _("HTTPS is assumed during this analyzis.")
+    if comment:
+        desc += "<p>%s</p>\n" % comment
+    desc += "<table><thead>\n"
+    desc += "<tr><th>%s</th><th>%s</th></tr>\n" % (_("Test"), _("Pass"))
+    desc += "</thead><tbody>\n"
+    for k in (
+        "check_unsafe_inline_script",
+        "check_eval_script",
+        "check_object",
+        "check_unsafe_inline_style",
+        "check_block_active_http_content",
+        "check_block_passive_http_content",
+        "check_clickjacking_protection",
+        "check_default_deny",
+        "check_base_tag",
+        "check_form_destinations",
+        "check_script_dynamic",
+    ):
+        desc += "<tr><td>%s</td><td>%s</td></tr>\n" % (
+            getattr(CSPParser, k).__doc__,
+            bool_icon(getattr(CSPParser, k)),
+        )
+    desc += "</tbody></table>\n"
+    return desc, score

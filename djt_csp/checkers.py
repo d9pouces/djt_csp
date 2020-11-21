@@ -23,12 +23,11 @@ from logging import INFO, ERROR, WARNING
 from typing import Optional, Tuple, Dict, List, Union
 
 from django.conf import settings
-from django.templatetags.static import static
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
-from djt_csp.csp_analyzis import get_csp_analyzis
+from djt_csp.csp_analyzis import get_csp_analyzis, bool_icon
 
 CHECKED_HTTP_HEADERS = {
     "content-security-policy",
@@ -49,11 +48,6 @@ CHECKED_RESOURCES = {
 }
 
 
-def bool_icon(b: bool) -> str:
-    icon = "admin/img/icon-no.svg"
-    if b:
-        icon = "admin/img/icon-yes.svg"
-    return '<img src="%s" alt="%s">' % (static(icon), b)
 
 
 class Checker:
@@ -530,15 +524,12 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
 
     @property
     def content(self) -> str:
-        content, __ = self.analyzis
+        value, src = self.get_header("Content-Security-Policy")
+        content, __ = get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
         return mark_safe(content)
 
     @property
     def score(self) -> int:
-        __, score = self.analyzis
-        return score
-
-    @cached_property
-    def analyzis(self) -> Tuple[str, int]:
         value, src = self.get_header("Content-Security-Policy")
-        return get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
+        __, score = get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
+        return score
