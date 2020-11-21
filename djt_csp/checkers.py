@@ -18,17 +18,17 @@ https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/scoring.md
 
 """
 import html
-import re
-from functools import lru_cache
 from html import escape
 from logging import INFO, ERROR, WARNING
-from typing import Optional, Tuple, Dict, List, Union, Set
+from typing import Optional, Tuple, Dict, List, Union
 
 from django.conf import settings
 from django.templatetags.static import static
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+
+from djt_csp.csp_analyzis import get_csp_analyzis
 
 CHECKED_HTTP_HEADERS = {
     "content-security-policy",
@@ -431,7 +431,7 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
                 csrf_is_samesite = csrf_is_samesite and (
                     samesite_value in {"strict", "lax"}
                 )
-            prefixed = name.startswith("__Secure-") or name.startswith("__Secure-")
+            prefixed = name.startswith("__Secure-") or name.startswith("__Host-")
             if not prefixed:
                 non_prefixed_count += 1
             if not cookie["secure"]:
@@ -528,10 +528,6 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
         "https://infosec.mozilla.org/guidelines/web_security#content-security-policy"
     )
 
-    def __init__(self, stats):
-        super().__init__(stats=stats)
-        self.by_directive = None
-
     @property
     def content(self) -> str:
         content, __ = self.analyzis
@@ -545,194 +541,4 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
     @cached_property
     def analyzis(self) -> Tuple[str, int]:
         value, src = self.get_header("Content-Security-Policy")
-        if value is None:
-            return (
-                "<p>%s</p>"
-                % _("Content Security Policy (CSP) header not implemented."),
-                -25,
-            )
-        self.by_directive = parse_csp(value)
-        directives = CSPParser.fetch_directives
-        if self.by_directive is None:
-            comment = _(
-                "Content Security Policy (CSP) header cannot be parsed successfully."
-            )
-            score = -25
-        elif self.get_sources("default-src") == {"none"} and all(
-            {"unsafe-inline", "unsafe-eval"}.isdisjoint(x)
-            for x in self.by_directive.values()
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented with default-src 'none'"
-                " and without 'unsafe-inline' or 'unsafe-eval'"
-            )
-            score = 10
-        elif all(
-            {"unsafe-inline", "unsafe-eval"}.isdisjoint(self.get_sources(x))
-            for x in directives
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented without 'unsafe-inline' or 'unsafe-eval'"
-            )
-            score = 5
-        elif all(
-            {"unsafe-inline", "data:", "http:", "https:"}.isdisjoint(self.get_sources(x))
-            for x in directives
-            if x != "style-src"
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented with unsafe directives inside style-src. "
-                "This includes 'unsafe-inline', data:, or overly broad sources such as https: "
-            )
-            score = 0
-        elif any(
-            {"http:", "http://"}.intersection(self.get_sources(x))
-            for x in ("frame-src", "object-src", "media-src", "img-src",)
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented, but secure site allows images "
-                "or media to be loaded over http"
-            )
-            score = -10
-        elif any(
-            "unsafe-eval" in self.get_sources(x) for x in directives
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented, but allows 'unsafe-eval'"
-            )
-            score = -10
-        elif self.is_secure and any(
-                {"http://", "http:"} .intersection(self.get_sources(x)) for x in directives
-        ):
-            comment = _(
-                "Content Security Policy (CSP) implemented, but secure site allows resources to be loaded from http"
-            )
-            score = -20
-        elif ({"unsafe-inline", "data:", "https:"} .intersection(self.get_sources("script-src")) or
-            {"https:"} .intersection(self.get_sources("object-src"))):
-            comment = _(
-                "Content Security Policy (CSP) implemented unsafely. This includes 'unsafe-inline\' or data:"
-                " inside script-src, overly broad sources such as https: inside object-src or script-src, or"
-                " not restricting the sources for object-src or script-src."
-            )
-            score = -20
-        elif not self.is_secure:
-            comment = _("Content Security Policy (CSP) implemented, but site is not secure")
-            score = -10
-        else:
-            comment = _("No comment")
-            score = 0
-        return (
-            "<p>%s</p>" % comment,
-            score,
-        )
-
-    def get_sources(self, directive: str):
-        return self.by_directive.get(
-            directive, self.by_directive.get("default-src", CSPParser.any_sources),
-        )
-
-
-class CSPParser:
-    fetch_directives = {
-        "child-src",
-        "connect-src",
-        "default-src",
-        "font-src",
-        "frame-src",
-        "img-src",
-        "manifest-src",
-        "media-src",
-        "object-src",
-        "prefetch-src",
-        "script-src",
-        "script-src-elem",
-        "script-src-attr",
-        "style-src",
-        "style-src-elem",
-        "style-src-attr",
-        "worker-src",
-    }
-    document_directives = {"base-uri", "plugin-types", "sandbox"}
-    navigation_directives = {"form-action", "frame-ancestors", "navigate-to"}
-    report_directives = {"report-uri", "report-to"}
-    other_directives = {
-        "block-all-mixed-content",
-        "referrer",
-        "require-sri-for",
-        "trusted-types",
-        "upgrade-insecure-requests",
-    }
-    all_directives = (
-        fetch_directives
-        | document_directives
-        | navigation_directives
-        | report_directives
-        | other_directives
-    )
-    any_sources = {
-        "http:",
-        "https:",
-        "blob:",
-        "mediastream:",
-        "filesystem:",
-        "data:",
-        "unsafe-eval",
-        "unsafe-hashes",
-        "unsafe-inline",
-    }
-
-    source_re = re.compile(
-        r"^("
-        r"'http:'|'https:'|'blob:'|'mediastream:'|'filesystem:'|'data:'|"
-        r"http:|https:|blob:|mediastream:|filesystem:|data:|"
-        r"'self'|'unsafe-eval'|'unsafe-hashes'|'unsafe-inline'|'none'|'nonce-[A-Za-z\d+/]+'|"
-        r"'sha256-[A-Za-z\d+/]+'|'sha384-[A-Za-z\d+/]+'|'sha512-[A-Za-z\d+/]+'|"
-        r"(http://|https://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?"
-        r")$"
-    )
-    host_re = re.compile(r"^((http://|https://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?)$")
-    data_re = re.compile(r"^(nonce-|sha256-|sha384-|sha512-)")
-
-    def parse_csp(self, policies: str) -> Dict[str, Set[str]]:
-        by_directive = {}
-        for policy in policies.split(";"):
-            parsed_policy = self.parse_policy(policy.strip())
-            if parsed_policy:
-                directive, sources = parsed_policy
-                by_directive[directive] = sources
-        return by_directive
-
-    def parse_policy(self, policy: str) -> Optional[Tuple[str, Set[str]]]:
-        directive, sep, arg = policy.partition(" ")
-        if directive not in self.all_directives:
-            raise ValueError("%s is not recognized" % directive)
-        if directive not in self.fetch_directives:
-            return
-        sources = set()
-        for source in arg.split(" "):
-            if not source or not self.source_re.match(source):
-                continue
-            if self.host_re.match(source):
-                if source.startswith("http://"):
-                    sources.add("http://")
-                elif source.startswith("https://"):
-                    sources.add("http://")
-                else:
-                    sources |= {"http://", "https://"}
-                continue
-            source = source.replace("'", "")
-            if self.data_re.match(source):
-                sources.add(source.split("-")[0])
-                continue
-            sources.add(source)
-        return directive, sources
-
-
-@lru_cache()
-def parse_csp(policies: str) -> Optional[Dict[str, Set[str]]]:
-    parser = CSPParser()
-    try:
-        return parser.parse_csp(policies)
-    except ValueError:
-        return None
+        return get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)

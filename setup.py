@@ -17,10 +17,7 @@
 from setuptools import setup
 
 setup(
-    install_requires=[
-        "django",
-        "django-debug-toolbar",
-    ],
+    install_requires=["django", "django-debug-toolbar",],
     setup_require=["setuptools", "wheel"],
     tests_require=["tox"],
 )

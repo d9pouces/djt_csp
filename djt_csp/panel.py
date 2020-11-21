@@ -22,9 +22,7 @@ from typing import Dict, List
 
 import pkg_resources
 from debug_toolbar.panels import Panel
-from django.conf import settings
 from django.http import HttpResponse, HttpRequest
-
 # noinspection PyProtectedMember
 from django.template import engines, TemplateSyntaxError
 from django.templatetags.static import static
@@ -38,7 +36,9 @@ from djt_csp.checkers import (
     RefererComponent,
     XSSProtection,
     FrameOptions,
-    ScriptIntegrityChecker, CookieAnalyzer, CSPChecker,
+    ScriptIntegrityChecker,
+    CookieAnalyzer,
+    CSPChecker,
 )
 
 
@@ -106,14 +106,10 @@ class SecurityPanel(Panel):
         elif response.status_code < 200 or (300 <= response.status_code < 400):
             return
         max_age = 365 * 24 * 60 * 60  # one year
-        expires = datetime.datetime.strftime(datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
-                                             "%a, %d-%b-%Y %H:%M:%S GMT")
-        response.set_cookie("s_1", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
-                            secure=True, httponly=True,  samesite='Strict')
-        response.set_cookie("s_2", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
-                            secure=True, httponly=False,  samesite='None')
-        response.set_cookie("s_3", "value", max_age=max_age, expires=expires, domain=settings.SESSION_COOKIE_DOMAIN,
-                            secure=False, httponly=True,  samesite='Lax')
+        expires = datetime.datetime.strftime(
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
+            "%a, %d-%b-%Y %H:%M:%S GMT",
+        )
         response_headers = {}
         for header in CHECKED_HTTP_HEADERS:
             if header in response:
