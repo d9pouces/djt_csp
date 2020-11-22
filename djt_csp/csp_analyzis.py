@@ -3,7 +3,7 @@ from functools import lru_cache
 from typing import Optional, Set, Dict, Tuple
 
 from django.templatetags.static import static
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 
 def bool_icon(b: bool) -> str:
@@ -74,7 +74,7 @@ class CSPParser:
     )
     navigation_source_re = fetch_source_re
     host_re = re.compile(
-        r"^((http://|https://|ftp://|ftps://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?)$"
+        r"^((http://|https://|ftp://|ftps://)?[\w.\-]+(:\d{1,5})?)$"
     )
     data_re = re.compile(r"^(nonce-|sha256-|sha384-|sha512-)")
 
@@ -126,9 +126,11 @@ class CSPParser:
         return directive, sources
 
     def sources(self, directive: str) -> Set[str]:
-        return self.by_directive.get(
-            directive, self.by_directive.get("default-src", CSPParser.any_sources),
-        )
+        if directive in self.fetch_directives:
+            return self.by_directive.get(
+                directive, self.by_directive.get("default-src", CSPParser.any_sources),
+            )
+        return self.by_directive.get(directive, CSPParser.any_sources)
 
     @property
     def check_unsafe_inline_script(self):

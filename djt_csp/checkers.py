@@ -17,7 +17,7 @@
 https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/scoring.md
 
 """
-import html
+import re
 from html import escape
 from logging import INFO, ERROR, WARNING
 from typing import Optional, Tuple, Dict, List, Union
@@ -25,14 +25,15 @@ from typing import Optional, Tuple, Dict, List, Union
 from django.conf import settings
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
-from djt_csp.csp_analyzis import get_csp_analyzis, bool_icon
+from djt_csp.csp_analyzis import get_csp_analyzis, bool_icon, get_csp_parser
 
 CHECKED_HTTP_HEADERS = {
     "content-security-policy",
     "access-control-allow-origin",
     "strict-transport-security",
+    "public-key-pins",
     "referrer-policy",
     "x-content-type-options",
     "x-frame-options",
@@ -46,8 +47,6 @@ CHECKED_RESOURCES = {
     "link": "href",
     "iframe": "src",
 }
-
-
 
 
 class Checker:
@@ -230,7 +229,6 @@ x-frame-options-not-implemented	X-Frame-Options (XFO) header not implemented	-20
 x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized	-20
 """
 
-    # TODO: use x-frame-options-implemented-via-csp
     reference_link = (
         "https://infosec.mozilla.org/guidelines/web_security#x-frame-options"
     )
@@ -242,6 +240,26 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
         "DENY": 0,
         "ALLOW-FROM": 0,
     }
+
+    @property
+    def content(self) -> str:
+        value, src = self.get_header("Content-Security-Policy")
+        parser = get_csp_parser(value, is_secure=self.is_secure)
+        if "frame-ancestors" in parser.by_directive:
+            content = "<p>%s</p>" % _(
+                "X-Frame-Options (XFO) implemented via the CSP frame-ancestors directive."
+            )
+        else:
+            content = super().content
+        return mark_safe(content)
+
+    @property
+    def score(self) -> int:
+        value, src = self.get_header("Content-Security-Policy")
+        parser = get_csp_parser(value, is_secure=self.is_secure)
+        if parser.sources("frame-ancestors").isdisjoint({"http:", "https:"}):
+            return 5
+        return super().score
 
 
 class ScriptIntegrityChecker(Checker):
@@ -284,7 +302,7 @@ sri-not-implemented-response-not-html	                        Subresource Integr
         no_sri_counts = {"http": 0, "https": 0, "similar": 0}
         for attr in self.scripts_attributes:
             src = attr.get("src", "")
-            fmt_char = {"src": html.escape(src)}
+            fmt_char = {"src": escape(src)}
             if src.startswith("http://"):
                 key = "http"
                 notes.append(_("You should load %(src)s over https") % fmt_char)
@@ -345,21 +363,153 @@ cross-origin-resource-sharing-not-implemented	Content is not visible via cross-o
 xml-not-parsable	crossdomain.xml or clientaccesspolicy.xml claims to be xml, but cannot be parsed	-20
 cross-origin-resource-sharing-implemented-with-universal-access"""
 
-    header_name = "Referrer-Policy"
+    header_name = "Access-Control-Allow-Origin"
     reference_link = "https://infosec.mozilla.org/guidelines/web_security#cross-origin-resource-sharing"
-    invalid_valid_score = -5
-    header_values = {
-        "no-referrer": 5,
-        "same-origin": 5,
-        "strict-origin": 5,
-        "strict-origin-when-cross-origin": 5,
-        "no-referrer-when-downgrade": 0,
-        None: 0,
-        "": 0,
-        "origin": -5,
-        "origin-when-cross-origin": -5,
-        "unsafe-url": -5,
-    }
+
+    @property
+    def content(self) -> str:
+        value, src = self.get_header(self.header_name)
+        if value is None:
+            return _(
+                "The %(h)s HTTP header is intended for API endpoints and resources."
+            ) % {"h": self.header_name}
+        return _('Header %(h)sis set to "%(v)s"') % {"v": escape(value), "h": self.header_name}
+
+    def is_valid(self, value):
+        return value in self.header_values
+
+    @property
+    def score(self) -> int:
+        return 0
+
+
+class HSTSChecker(HeaderChecker):
+    """
+hsts-preloaded	Preloaded via the HTTP Strict Transport Security (HSTS) preloading process	5
+hsts-implemented-max-age-at-least-six-months	HTTP Strict Transport Security (HSTS) header set 
+    to a minimum of six months (15768000)	0
+hsts-implemented-max-age-less-than-six-months	HTTP Strict Transport Security (HSTS) header set 
+    to less than six months (15768000)	-10
+
+hsts-not-implemented	HTTP Strict Transport Security (HSTS) header not implemented	-20
+hsts-header-invalid	HTTP Strict Transport Security (HSTS) header cannot be recognized	-20
+hsts-not-implemented-no-https	HTTP Strict Transport Security (HSTS) header cannot be
+    set for sites not available over https	-20
+hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as site 
+    contains an invalid certificate chain	-20
+"""
+
+    header_name = "Strict-Transport-Security"
+    reference_link = "https://infosec.mozilla.org/guidelines/web_security#http-strict-transport-security"
+    invalid_score = -20
+    missing_score = -20
+
+    def __init__(self, stats):
+        super().__init__(stats)
+        self.age = 0
+        self.preload = False
+        self.subdomains = False
+        self.invalid = False
+
+    @property
+    def content(self) -> str:
+        content, __ = self.analyzis
+        return mark_safe(content)
+
+    @property
+    def score(self) -> int:
+        __, score = self.analyzis
+        return score
+
+    @cached_property
+    def analyzis(self) -> Tuple[str, int]:
+        name = self.header_name
+        value, src = self.get_header(name)
+        fmt = {"h": name, "v": escape(value or "")}
+        if value is None and not self.is_secure:
+            msg = _("The %(h)s HTTP header cannot be set for sites not available over https.")
+            return msg % fmt, self.missing_score
+        elif value is None:
+            msg = _("The %(h)s HTTP header not implemented.")
+            return msg % fmt, self.missing_score
+        components = {x.strip() for x in value.split(";")}
+        while components:
+            sub_value = components.pop()
+            self.check_component(sub_value)
+        fmt.update({"age": self.age, "preload": self.preload, "subdomains": self.subdomains})
+        if self.invalid or self.age == 0:
+            msg = "The %(h)s HTTP header cannot be parsed ('%(v)s' is invalid)."
+            return msg % fmt, self.invalid_score
+        return self.get_message(fmt)
+
+    def get_message(self, fmt):
+        if self.age <= 15768000:
+            msg = _("The %(h)s HTTP header set to less than six months (%(age)s <= 15768000)")
+            score = -10
+        elif self.preload:
+            msg = _("Preloaded via the HTTP %(h)s preloading process")
+            score = 5
+        else:
+            msg = _("The %(h)s HTTP header set to a minimum of six months (15768000)")
+            score = 0
+        return msg % fmt, score
+
+    def check_component(self, sub_value):
+        matcher = re.match(r"^max-age=([1-9]\d*)$", sub_value)
+        if matcher:
+            self.age = int(matcher.group(1))
+        elif re.match('^report-uri="http.*"$', sub_value):
+            return
+        elif sub_value == "preload":
+            self.preload = True
+        elif sub_value == "includeSubDomains":
+            self.subdomains = True
+        else:
+            self.invalid = True
+
+
+class HPKPChecker(HSTSChecker):
+    """
+hpkp-preloaded	Preloaded via the HTTP Public Key Pinning (HPKP) preloading process	0
+hpkp-implemented-max-age-at-least-fifteen-days	HTTP Public Key Pinning (HPKP) header
+    set to a minimum of 15 days (1296000)	0
+hpkp-implemented-max-age-less-than-fifteen-days	HTTP Public Key Pinning (HPKP) header
+    set to less than 15 days (1296000)	0
+hpkp-not-implemented	HTTP Public Key Pinning (HPKP) header not implemented	0
+hpkp-invalid-cert	HTTP Public Key Pinning (HPKP) header cannot be set,
+    as site contains an invalid certificate chain	0
+hpkp-not-implemented-no-https	HTTP Public Key Pinning (HPKP) header can't be implemented without https	0
+hpkp-header-invalid	HTTP Public Key Pinning (HPKP) header cannot be recognized	-5
+"""
+
+    header_name = "Public-Key-Pins"
+    reference_link = "https://infosec.mozilla.org/guidelines/web_security#http-public-key-pinning"
+    invalid_score = -5
+    missing_score = 0
+
+    def __init__(self, stats):
+        super().__init__(stats)
+        self.pinned_keys = set()
+
+    def get_message(self, fmt):
+        score = 0
+        if len(self.pinned_keys) == 0:
+            msg = _("No public key is defined by the %(h)s HTTP header.")
+            score = -5
+        elif self.age <= 1296000:
+            msg = _("The %(h)s HTTP header set to less than 15 days (%(age)s <= 1296000)")
+        elif self.preload:
+            msg = _("Preloaded via the HTTP %(h)s preloading process")
+        else:
+            msg = _("The %(h)s HTTP header set to a minimum of 15 days (1296000)")
+        return msg % fmt, score
+
+    def check_component(self, sub_value):
+        matcher = re.match(r"^pin-(sha256-[A-Za-z\d+/]+)$", sub_value)
+        if matcher:
+            self.pinned_keys.add(matcher.group(1))
+        else:
+            super().check_component(sub_value)
 
 
 class CookieAnalyzer(Checker):
@@ -525,7 +675,9 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
     @property
     def content(self) -> str:
         value, src = self.get_header("Content-Security-Policy")
-        content, __ = get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
+        content, __ = get_csp_analyzis(
+            value, is_secure=self.is_secure or settings.DEBUG
+        )
         return mark_safe(content)
 
     @property

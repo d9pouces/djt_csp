@@ -38,7 +38,7 @@ from djt_csp.checkers import (
     FrameOptions,
     ScriptIntegrityChecker,
     CookieAnalyzer,
-    CSPChecker,
+    CSPChecker, CORSChecker, HSTSChecker, HPKPChecker,
 )
 
 
@@ -157,15 +157,18 @@ class SecurityPanel(Panel):
     def components(self) -> List[Checker]:
         stats = self.get_stats()
         components = []  # type: List[Checker]
-        if stats["html_headers"]:
+        if stats["html_headers"] is not None:
             components = [
-                ContentTypeSniff(stats),
-                RefererComponent(stats),
-                XSSProtection(stats),
-                FrameOptions(stats),
                 CSPChecker(stats),
-                ScriptIntegrityChecker(stats),
                 CookieAnalyzer(stats),
+                CORSChecker(stats),
+                HPKPChecker(stats),
+                HSTSChecker(stats),
+                RefererComponent(stats),
+                ScriptIntegrityChecker(stats),
+                ContentTypeSniff(stats),
+                FrameOptions(stats),
+                XSSProtection(stats),
             ]
         for comp in components:
             comp.load()
