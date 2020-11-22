@@ -373,7 +373,10 @@ cross-origin-resource-sharing-implemented-with-universal-access"""
             return _(
                 "The %(h)s HTTP header is intended for API endpoints and resources."
             ) % {"h": self.header_name}
-        return _('Header %(h)sis set to "%(v)s"') % {"v": escape(value), "h": self.header_name}
+        return _('Header %(h)sis set to "%(v)s"') % {
+            "v": escape(value),
+            "h": self.header_name,
+        }
 
     def is_valid(self, value):
         return value in self.header_values
@@ -427,7 +430,9 @@ hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as
         value, src = self.get_header(name)
         fmt = {"h": name, "v": escape(value or "")}
         if value is None and not self.is_secure:
-            msg = _("The %(h)s HTTP header cannot be set for sites not available over https.")
+            msg = _(
+                "The %(h)s HTTP header cannot be set for sites not available over https."
+            )
             return msg % fmt, self.missing_score
         elif value is None:
             msg = _("The %(h)s HTTP header not implemented.")
@@ -436,7 +441,9 @@ hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as
         while components:
             sub_value = components.pop()
             self.check_component(sub_value)
-        fmt.update({"age": self.age, "preload": self.preload, "subdomains": self.subdomains})
+        fmt.update(
+            {"age": self.age, "preload": self.preload, "subdomains": self.subdomains}
+        )
         if self.invalid or self.age == 0:
             msg = "The %(h)s HTTP header cannot be parsed ('%(v)s' is invalid)."
             return msg % fmt, self.invalid_score
@@ -444,7 +451,9 @@ hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as
 
     def get_message(self, fmt):
         if self.age <= 15768000:
-            msg = _("The %(h)s HTTP header set to less than six months (%(age)s <= 15768000)")
+            msg = _(
+                "The %(h)s HTTP header set to less than six months (%(age)s <= 15768000)"
+            )
             score = -10
         elif self.preload:
             msg = _("Preloaded via the HTTP %(h)s preloading process")
@@ -483,7 +492,9 @@ hpkp-header-invalid	HTTP Public Key Pinning (HPKP) header cannot be recognized	-
 """
 
     header_name = "Public-Key-Pins"
-    reference_link = "https://infosec.mozilla.org/guidelines/web_security#http-public-key-pinning"
+    reference_link = (
+        "https://infosec.mozilla.org/guidelines/web_security#http-public-key-pinning"
+    )
     invalid_score = -5
     missing_score = 0
 
@@ -497,7 +508,9 @@ hpkp-header-invalid	HTTP Public Key Pinning (HPKP) header cannot be recognized	-
             msg = _("No public key is defined by the %(h)s HTTP header.")
             score = -5
         elif self.age <= 1296000:
-            msg = _("The %(h)s HTTP header set to less than 15 days (%(age)s <= 1296000)")
+            msg = _(
+                "The %(h)s HTTP header set to less than 15 days (%(age)s <= 1296000)"
+            )
         elif self.preload:
             msg = _("Preloaded via the HTTP %(h)s preloading process")
         else:

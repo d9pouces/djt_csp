@@ -73,9 +73,7 @@ class CSPParser:
         r")$"
     )
     navigation_source_re = fetch_source_re
-    host_re = re.compile(
-        r"^((http://|https://|ftp://|ftps://)?[\w.\-]+(:\d{1,5})?)$"
-    )
+    host_re = re.compile(r"^((http://|https://|ftp://|ftps://)?[\w.\-]+(:\d{1,5})?)$")
     data_re = re.compile(r"^(nonce-|sha256-|sha384-|sha512-)")
 
     def __init__(self, policies: str, is_secure: bool = True):

@@ -57,9 +57,13 @@ class TestCSPParser(BaseTestCase):
     def test_cspparser_5(self):
         parser = CSPParser()
         policies = parser.get_csp_parser("default-src 'none'; frame-ancestors 'none'")
-        self.assertEqual({"default-src": {"none"}, 'frame-ancestors': {'none'}}, policies)
+        self.assertEqual(
+            {"default-src": {"none"}, "frame-ancestors": {"none"}}, policies
+        )
 
     def test_cspparser_6(self):
-        parser = CSPParser("default-src 'none' ; script-src 'self' ; font-src 'self' ; style-src 'self' 'unsafe-inline' ; img-src 'self' data: ; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; connect-src *; ")
+        parser = CSPParser(
+            "default-src 'none' ; script-src 'self' ; font-src 'self' ; style-src 'self' 'unsafe-inline' ; img-src 'self' data: ; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; connect-src *; "
+        )
         parser.load()
         return parser.policies

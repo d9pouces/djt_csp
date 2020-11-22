@@ -38,7 +38,10 @@ from djt_csp.checkers import (
     FrameOptions,
     ScriptIntegrityChecker,
     CookieAnalyzer,
-    CSPChecker, CORSChecker, HSTSChecker, HPKPChecker,
+    CSPChecker,
+    CORSChecker,
+    HSTSChecker,
+    HPKPChecker,
 )
 
 
