@@ -6,8 +6,11 @@ Add a panel to [django-debug-toolbar](https://github.com/jazzband/django-debug-t
 
 ![Screenshot](djt_csp.png)
 
-Just add "djt_csp.panel.CSPPanel" to your settings `DEBUG_TOOLBAR_PANELS`.
-
+Just install `djt-csp`...
+```bash
+python3 -m pip install djt-csp
+```
+ and add "djt_csp.panel.CSPPanel" to your settings `DEBUG_TOOLBAR_PANELS`.
 ```python
 # django-debug-toolbar
 DEBUG_TOOLBAR_PANELS = [
