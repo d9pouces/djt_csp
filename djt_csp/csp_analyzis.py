@@ -224,7 +224,12 @@ def get_csp_parser(policies: str, is_secure: bool = True) -> Optional[CSPParser]
 def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
     if policies is None:
         return (
-            "<p>%s</p>" % _("Content Security Policy (CSP) header not implemented."),
+            "<p>%s</p>"
+            % _(
+                "Content Security Policy (CSP) header not implemented."
+                " You should take a look at "
+                '<a href="https://django-csp.readthedocs.io/en/latest/">Django CSP</a> to add it.'
+            ),
             -25,
         )
     parser = get_csp_parser(policies, is_secure=is_secure)
