@@ -10,13 +10,13 @@ Just install `djt-csp`...
 ```bash
 python3 -m pip install djt-csp
 ```
- and add "djt_csp.panel.CSPPanel" to your settings `DEBUG_TOOLBAR_PANELS`.
+ and add "djt_csp.panel.SecurityPanel" to your settings `DEBUG_TOOLBAR_PANELS`.
 ```python
 # django-debug-toolbar
 DEBUG_TOOLBAR_PANELS = [
     "debug_toolbar.panels.versions.VersionsPanel",
     "debug_toolbar.panels.timer.TimerPanel",
-    "djt_csp.panel.CSPPanel",
+    "djt_csp.panel.SecurityPanel",
     "debug_toolbar.panels.settings.SettingsPanel",
     "debug_toolbar.panels.profiling.ProfilingPanel",
     "debug_toolbar.panels.headers.HeadersPanel",

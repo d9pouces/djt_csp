@@ -660,7 +660,7 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
         return content, score
 
 
-class CSPChecker(Checker):
+class CSPChecker(HeaderChecker):
     """
 
 csp-implemented-with-no-unsafe-default-src-none	Content Security Policy (CSP) implemented with
@@ -680,14 +680,14 @@ csp-header-invalid	Content Security Policy (CSP) header cannot be parsed success
 csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
 """
 
-    title = _("Content security policy")
     reference_link = (
         "https://infosec.mozilla.org/guidelines/web_security#content-security-policy"
     )
+    header_name = "Content-Security-Policy"
 
     @property
-    def content(self) -> str:
-        value, src = self.get_header("Content-Security-Policy")
+    def content(self,) -> str:
+        value, src = self.get_header(self.header_name)
         content, __ = get_csp_analyzis(
             value, is_secure=self.is_secure or settings.DEBUG
         )
@@ -695,6 +695,6 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
 
     @property
     def score(self) -> int:
-        value, src = self.get_header("Content-Security-Policy")
+        value, src = self.get_header(self.header_name)
         __, score = get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
         return score

@@ -82,7 +82,8 @@ class CSPParser:
         self.by_directive = {}  # type: Dict[str, Set[str]]
 
     def load(self):
-        self.by_directive = {}
+        if self.policies is None:
+            return
         for policy in self.policies.split(";"):
             stripped = policy.strip()
             if not stripped:
@@ -317,7 +318,7 @@ def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
     ):
         desc += "<tr><td>%s</td><td>%s</td></tr>\n" % (
             getattr(CSPParser, k).__doc__,
-            bool_icon(getattr(CSPParser, k)),
+            bool_icon(getattr(parser, k)),
         )
     desc += "</tbody></table>\n"
     return desc, score
