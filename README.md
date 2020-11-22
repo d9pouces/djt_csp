@@ -4,7 +4,7 @@ djt_csp
 Add a panel to [django-debug-toolbar](https://github.com/jazzband/django-debug-toolbar) for checking some security headers.
 `djt_csp` is a close copy of the [Mozilla observatory](https://observatory.mozilla.org/). 
 
-![Screenshot](djt_csp.png)
+![Screenshot](https://github.com/d9pouces/djt_csp/raw/master/djt_csp.png)
 
 Just install `djt-csp`...
 ```bash
