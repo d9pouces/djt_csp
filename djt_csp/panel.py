@@ -23,6 +23,7 @@ from typing import Dict, List
 import pkg_resources
 from debug_toolbar.panels import Panel
 from django.http import HttpResponse, HttpRequest
+
 # noinspection PyProtectedMember
 from django.template import engines, TemplateSyntaxError
 from django.templatetags.static import static
@@ -103,10 +104,15 @@ class SecurityPanel(Panel):
     has_content = True
 
     def generate_stats(self, request: HttpRequest, response: HttpResponse):
-        content_type = response["Content-Type"]
-        if not content_type.startswith("text/html"):
-            return
-        elif response.status_code < 200 or (300 <= response.status_code < 400):
+        content_type = ""
+        if response.has_header("Content-Type"):
+            content_type = response["Content-Type"]
+        if (
+            not content_type.startswith("text/html")
+            or not isinstance(response, HttpResponse)
+            or response.status_code < 200
+            or (300 <= response.status_code < 400)
+        ):
             return
         max_age = 365 * 24 * 60 * 60  # one year
         expires = datetime.datetime.strftime(
