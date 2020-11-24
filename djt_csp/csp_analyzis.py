@@ -302,28 +302,30 @@ def get_csp_analyzis(policies: Optional[str], is_secure: bool = True):
     else:
         comment = None
         score = 0
-    desc = "<p>%s</p>" % _("HTTPS is assumed during this analyzis.")
+    desc = ""
     if comment:
         desc += "<p>%s</p>\n" % comment
-    desc += "<table><thead>\n"
-    desc += "<tr><th>%s</th><th>%s</th></tr>\n" % (_("Test"), _("Pass"))
-    desc += "</thead><tbody>\n"
-    for k in (
-        "check_unsafe_inline_script",
-        "check_eval_script",
-        "check_object",
-        "check_unsafe_inline_style",
-        "check_block_active_http_content",
-        "check_block_passive_http_content",
-        "check_clickjacking_protection",
-        "check_default_deny",
-        "check_base_tag",
-        "check_form_destinations",
-        "check_script_dynamic",
-    ):
-        desc += "<tr><td>%s</td><td>%s</td></tr>\n" % (
-            getattr(CSPParser, k).__doc__,
-            bool_icon(getattr(parser, k)),
-        )
-    desc += "</tbody></table>\n"
+    if parser:
+        desc += "<p>%s</p>" % _("HTTPS is assumed during this analyzis.")
+        desc += "<table><thead>\n"
+        desc += "<tr><th>%s</th><th>%s</th></tr>\n" % (_("Test"), _("Pass"))
+        desc += "</thead><tbody>\n"
+        for k in (
+            "check_unsafe_inline_script",
+            "check_eval_script",
+            "check_object",
+            "check_unsafe_inline_style",
+            "check_block_active_http_content",
+            "check_block_passive_http_content",
+            "check_clickjacking_protection",
+            "check_default_deny",
+            "check_base_tag",
+            "check_form_destinations",
+            "check_script_dynamic",
+        ):
+            desc += "<tr><td>%s</td><td>%s</td></tr>\n" % (
+                getattr(CSPParser, k).__doc__,
+                bool_icon(getattr(parser, k)),
+            )
+        desc += "</tbody></table>\n"
     return desc, score

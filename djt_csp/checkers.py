@@ -245,7 +245,7 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
     def content(self) -> str:
         value, src = self.get_header("Content-Security-Policy")
         parser = get_csp_parser(value, is_secure=self.is_secure)
-        if "frame-ancestors" in parser.by_directive:
+        if parser and "frame-ancestors" in parser.by_directive:
             content = "<p>%s</p>" % _(
                 "X-Frame-Options (XFO) implemented via the CSP frame-ancestors directive."
             )
@@ -257,7 +257,7 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
     def score(self) -> int:
         value, src = self.get_header("Content-Security-Policy")
         parser = get_csp_parser(value, is_secure=self.is_secure)
-        if parser.sources("frame-ancestors").isdisjoint({"http:", "https:"}):
+        if parser and parser.sources("frame-ancestors").isdisjoint({"http:", "https:"}):
             return 5
         return super().score
 
@@ -423,6 +423,13 @@ hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as
     def score(self) -> int:
         __, score = self.analyzis
         return score
+
+    @property
+    def level(self) -> int:
+        __, score = self.analyzis
+        if score < 0 and self.is_secure:
+            return WARNING
+        return INFO
 
     @cached_property
     def analyzis(self) -> Tuple[str, int]:
@@ -698,3 +705,10 @@ csp-not-implemented	Content Security Policy (CSP) header not implemented	-25
         value, src = self.get_header(self.header_name)
         __, score = get_csp_analyzis(value, is_secure=self.is_secure or settings.DEBUG)
         return score
+
+    @property
+    def level(self) -> int:
+        value, src = self.get_header(self.header_name)
+        if value is None:
+            return WARNING
+        return INFO
