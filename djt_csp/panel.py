@@ -166,7 +166,7 @@ class SecurityPanel(Panel):
     def components(self) -> List[Checker]:
         stats = self.get_stats()
         components = []  # type: List[Checker]
-        if stats["html_headers"] is not None:
+        if stats and stats.get("html_headers") is not None:
             components = [
                 CSPChecker(stats),
                 CookieAnalyzer(stats),
