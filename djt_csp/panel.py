@@ -13,7 +13,6 @@
 #  or https://cecill.info/licences/Licence_CeCILL-B_V1-fr.txt (French)         #
 #                                                                              #
 # ##############################################################################
-import datetime
 from functools import lru_cache, cached_property
 from html.parser import HTMLParser
 from http.cookies import SimpleCookie
@@ -23,7 +22,6 @@ from typing import Dict, List
 import pkg_resources
 from debug_toolbar.panels import Panel
 from django.http import HttpResponse, HttpRequest
-
 # noinspection PyProtectedMember
 from django.template import engines, TemplateSyntaxError
 from django.templatetags.static import static
@@ -114,11 +112,6 @@ class SecurityPanel(Panel):
             or (300 <= response.status_code < 400)
         ):
             return
-        max_age = 365 * 24 * 60 * 60  # one year
-        expires = datetime.datetime.strftime(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
-            "%a, %d-%b-%Y %H:%M:%S GMT",
-        )
         response_headers = {}
         for header in CHECKED_HTTP_HEADERS:
             if header in response:

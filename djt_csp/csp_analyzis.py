@@ -67,7 +67,7 @@ class CSPParser:
         r"'http:'|'https:'|'ftp:'|'ftps:'|'blob:'|'mediastream:'|'filesystem:'|'data:'|"
         r"http:|https:|ftp:|ftps:|blob:|mediastream:|filesystem:|data:|"
         r"'self'|'unsafe-eval'|'unsafe-hashes'|'unsafe-inline'|'report-sample'|"
-        r"'strict-dynamic'|'none'|'nonce-[A-Za-z\d+/]+'|"
+        r"'strict-dynamic'|'none'|'nonce-[A-Za-z\d+/]+'|\*|"
         r"'sha256-[A-Za-z\d+/]+'|'sha384-[A-Za-z\d+/]+'|'sha512-[A-Za-z\d+/]+'|"
         r"(http://|https://|ftp://|ftps://)?[\w*\-]+\.[\w.\-]+(:\d{1,5})?"
         r")$"
@@ -77,14 +77,14 @@ class CSPParser:
     data_re = re.compile(r"^(nonce-|sha256-|sha384-|sha512-)")
 
     def __init__(self, policies: str, is_secure: bool = True):
-        self.policies = policies
-        self.is_secure = is_secure
+        self.raw_policies_str = policies
+        self.is_secure = is_secure  # type: bool
         self.by_directive = {}  # type: Dict[str, Set[str]]
 
     def load(self):
-        if self.policies is None:
+        if self.raw_policies_str is None:
             return
-        for policy in self.policies.split(";"):
+        for policy in self.raw_policies_str.split(";"):
             stripped = policy.strip()
             if not stripped:
                 continue
@@ -108,6 +108,9 @@ class CSPParser:
             return
         for source in arg.split(" "):
             if not source or not source_re.match(source):
+                continue
+            if source == "*":
+                sources |= {"http://", "https://"}
                 continue
             if self.host_re.match(source):
                 if source.startswith("http://") or source.startswith("ftp://"):
