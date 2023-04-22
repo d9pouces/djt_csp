@@ -165,6 +165,7 @@ x-content-type-options-header-invalid	X-Content-Type-Options header cannot be re
     )
     header_values = {None: -5, "nosniff": 0}
     invalid_valid_score = -5
+    description = "Set by the `SECURE_CROSS_ORIGIN_OPENER_POLICY` setting and the `SecurityMiddleware` middleware."
 
 
 class RefererComponent(HeaderChecker):
@@ -194,6 +195,7 @@ referrer-policy-header-invalid	Referrer-Policy header cannot be recognized	-5
         "origin-when-cross-origin": -5,
         "unsafe-url": -5,
     }
+    description = "Set by the `SECURE_REFERRER_POLICY` setting and the `SecurityMiddleware` middleware."
 
 
 class XSSProtection(HeaderChecker):
@@ -240,6 +242,7 @@ x-frame-options-header-invalid	X-Frame-Options (XFO) header cannot be recognized
         "DENY": 0,
         "ALLOW-FROM": 0,
     }
+    description = "Set by the `X_FRAME_OPTIONS` setting and the `XFrameOptionsMiddleware` middleware."
 
     @property
     def content(self) -> str:
@@ -365,6 +368,7 @@ cross-origin-resource-sharing-implemented-with-universal-access"""
 
     header_name = "Access-Control-Allow-Origin"
     reference_link = "https://infosec.mozilla.org/guidelines/web_security#cross-origin-resource-sharing"
+    description = "With `django-cors-headers`, set by the `CORS_ALLOWED_ORIGINS` setting and the `CorsMiddleware` middleware."
 
     @property
     def content(self) -> str:
@@ -406,6 +410,8 @@ hsts-invalid-cert	HTTP Strict Transport Security (HSTS) header cannot be set, as
     reference_link = "https://infosec.mozilla.org/guidelines/web_security#http-strict-transport-security"
     invalid_score = -20
     missing_score = -20
+    description = "Set by the `SECURE_HSTS_SECONDS`, `SECURE_HSTS_PRELOAD` and " \
+                  "`SECURE_HSTS_INCLUDE_SUBDOMAINS` settings and the `SecurityMiddleware` middleware."
 
     def __init__(self, stats):
         super().__init__(stats)
@@ -565,6 +571,9 @@ cookies-session-without-secure-flag	Session cookie set without using the Secure 
 
     @cached_property
     def analyzis(self) -> Tuple[str, int]:
+        if not self.cookies:
+            content = "No cookies detected"
+            return content, 0
         content = (
             "<table><thead><tr>"
             "<th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th>"

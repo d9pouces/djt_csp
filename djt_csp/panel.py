@@ -13,35 +13,32 @@
 #  or https://cecill.info/licences/Licence_CeCILL-B_V1-fr.txt (French)         #
 #                                                                              #
 # ##############################################################################
-from functools import lru_cache, cached_property
-from html.parser import HTMLParser
-from http.cookies import SimpleCookie
-from logging import INFO, WARNING, CRITICAL, ERROR
-from typing import Dict, List
+from functools import cached_property, lru_cache
+from logging import CRITICAL, ERROR, INFO, WARNING
+from typing import List
 
 import pkg_resources
 from debug_toolbar.panels import Panel
-from django.http import HttpResponse, HttpRequest
+from django.http import HttpRequest, HttpResponse
 # noinspection PyProtectedMember
-from django.template import engines, TemplateSyntaxError
+from django.template import TemplateSyntaxError, engines
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 
 from djt_csp.checkers import (
-    CHECKED_RESOURCES,
-    CHECKED_HTTP_HEADERS,
+    CORSChecker,
+    CSPChecker,
     Checker,
     ContentTypeSniff,
-    RefererComponent,
-    XSSProtection,
-    FrameOptions,
-    ScriptIntegrityChecker,
     CookieAnalyzer,
-    CSPChecker,
-    CORSChecker,
-    HSTSChecker,
+    FrameOptions,
     HPKPChecker,
+    HSTSChecker,
+    RefererComponent,
+    ScriptIntegrityChecker,
+    XSSProtection,
 )
+from djt_csp.page_data import get_response_characteristics
 
 
 def template_from_string(template_string):
@@ -59,39 +56,6 @@ def template_from_string(template_string):
     raise TemplateSyntaxError(template_string)
 
 
-class HeaderHTMLParser(HTMLParser):
-    def __init__(self, *, convert_charrefs=True):
-        super().__init__(convert_charrefs=convert_charrefs)
-        self.headers = {}  # type: Dict[str, str]
-        self.scripts_attributes = []  # type: List[Dict[str, str]]
-        self.http_ws_resources = {
-            x: [] for x in CHECKED_RESOURCES
-        }  # type: Dict[str, List[str]]
-
-    def reset(self):
-        super().reset()
-        self.headers = {}
-        self.scripts_attributes = []
-        self.http_ws_resources = {x: [] for x in CHECKED_RESOURCES}
-
-    def handle_starttag(self, tag, attrs):
-        tag = tag.lower()
-        attrs = {x.lower(): y for (x, y) in attrs}
-        http_equiv = attrs.get("http-equiv", "").lower()
-        content = attrs.get("content")
-        if tag == "meta" and http_equiv in CHECKED_HTTP_HEADERS and content:
-            self.headers[http_equiv] = content
-        elif tag == "script":
-            self.scripts_attributes.append(attrs)
-        attr = CHECKED_RESOURCES.get(tag)
-        origin = attrs.get(tag, "")
-        if attr and (origin.startswith("http://") or origin.startswith("ws://")):
-            self.http_ws_resources[tag].append(origin)
-
-    def error(self, message):
-        pass
-
-
 class SecurityPanel(Panel):
     """
     """
@@ -102,58 +66,9 @@ class SecurityPanel(Panel):
     has_content = True
 
     def generate_stats(self, request: HttpRequest, response: HttpResponse):
-        content_type = ""
-        if response.has_header("Content-Type"):
-            content_type = response["Content-Type"]
-        if (
-            not content_type.startswith("text/html")
-            or not isinstance(response, HttpResponse)
-            or response.status_code < 200
-            or (300 <= response.status_code < 400)
-        ):
-            return
-        response_headers = {}
-        for header in CHECKED_HTTP_HEADERS:
-            if header in response:
-                response_headers[header] = response[header]
-        parser = HeaderHTMLParser()
-        try:
-            parser.feed(response.content.decode())
-            scripts_attributes = parser.scripts_attributes
-            html_headers = parser.headers
-            http_ws_resources = parser.http_ws_resources
-            cookies_l = []
-            cookies = response.cookies  # type: SimpleCookie
-            for name, values in cookies.items():
-                cookies_l.append(
-                    {
-                        "name": name,
-                        "expires": values["expires"],
-                        "path": values["path"],
-                        "comment": values["comment"],
-                        "domain": values["domain"],
-                        "max-age": values["max-age"],
-                        "secure": values["secure"],
-                        "version": values["version"],
-                        "httponly": values["httponly"],
-                        "samesite": values["samesite"],
-                    }
-                )
-        except AssertionError:
-            scripts_attributes = None
-            html_headers = None
-            http_ws_resources = None
-            cookies_l = None
-        values = {
-            "cookies": cookies_l,
-            "html_headers": html_headers,
-            "response_headers": response_headers,
-            "content_type": content_type,
-            "scripts_attributes": scripts_attributes,
-            "http_ws_resources": http_ws_resources,
-            "is_secure": request.is_secure(),
-        }
-        self.record_stats(values)
+        characteristics = get_response_characteristics(request, response)
+        if characteristics is not None:
+            self.record_stats(characteristics)
 
     @cached_property
     def components(self) -> List[Checker]:
